@@ -76,9 +76,6 @@ if os.environ.get("DJANGO_USE_SQLITE", "false").lower() == "true":
 
 AUTH_PASSWORD_VALIDATORS = [
     {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
-    },
-    {
         "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
     },
     {
