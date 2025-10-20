@@ -37,6 +37,8 @@ profile = "black"
 
 [tool.ruff]
 line-length = 88
+
+[tool.ruff.lint]
 select = ["E", "F", "B", "I", "UP"]
 
 [tool.pytest.ini_options]
