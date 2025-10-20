@@ -8,6 +8,8 @@ on:
 jobs:
   python:
     runs-on: ubuntu-latest
+    env:
+      DJANGO_USE_SQLITE: "true"
     defaults:
       run:
         working-directory: backend
