@@ -27,21 +27,32 @@ jobs:
           poetry run isort --check-only .
           poetry run pytest
 
-  node:
+    node:
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
-      - run: npm install
-      - run: npm run lint
-      - run: npm run build
-      - run: npm run test -- --run
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Lint frontend code
+        run: npm run lint
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Run frontend tests
+        run: npm run test -- --run
 
   docker:
     runs-on: ubuntu-latest
