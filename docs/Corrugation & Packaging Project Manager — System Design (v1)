@@ -1,0 +1,359 @@
+# Corrugation & Packaging Project Manager — System Design (v1)
+
+## 0) Purpose & Scope
+Design an end‑to‑end project management system tailored to corrugated packaging workflows (Sales → CSR → Structural Design → Graphic Design → Sample Making → Logistics). Optimized for: clarity for new hires, strict auditability, skill‑based assignment, inventory visibility, rush approvals, and analytics‑ready eventing.
+
+---
+
+## 1) Personas & Roles
+**Personas**
+- **Sales Rep**: Creates requests, tracks status, flags urgency, views proofs, sees sample shipment status.
+- **CSR (Customer Service Rep)**: Creates project, enters scope/instructions, attaches customer files, sets difficulty & target dates, requests Urgent. **Can edit again after Pricing/Quoting** to initiate a new revision cycle back to Design.
+- **Structural Designer**: Owns structural lane; selects **material grade** (e.g., 48BC/44C/32B), sets **fit/tolerance**, produces CAD/dieline baseline.
+- **Graphic Designer**: Builds production dieline/artwork off the structural baseline; runs after "Baseline Ready".
+- **Sample Maker**: Receives CAD package; sends to table; cuts, glues, packages; generates Delivery Label; triggers logistics email.
+- **Design Manager**: Manages triage, assignments/overrides, rush approvals, reopen policies.
+- **Logistics/Shipping Clerk**: Operates outside PM; receives automated email+label; books FedEx/truck; returns tracking/order info.
+- **Plant Manager/Executive**: Dashboards & KPIs.
+- **System Admin**: Users, roles, integrations, vocabularies.
+
+**RBAC Highlights**
+- CSR: Full edit in **Intake/Triage**; **read-only during Design**; **edit rights restored after Pricing/Quoting** to initiate new revision and re-route to Design.
+- Structural/Graphics: Edit only inside their swimlanes; file versioning enforced.
+- Sample: Edit sample records, generate labels, notify logistics; cannot change materials.
+- Design Manager: Assign/reroute/reopen; approve rush; modify deadlines & difficulty.
+- Logistics: Edit shipment records, add tracking/order numbers.
+
+---
+
+## 2) Workflow Lifecycle
+**Main States**
+1. **Intake** (CSR)
+2. **Triage** (Design Manager)
+3. **Structural** (In Progress → **Baseline Ready**)
+4. **Graphics** (In Progress → **Artwork Ready**) — **starts only after Baseline Ready**
+5. **Sample Making** (In Progress → **Labeled** → **Done**)
+6. **Pricing/Quoting**
+7. **Customer Approval**
+8. **Credit Approval**
+9. **Graphic Prod. Drawing**
+10. **Activate/Order/Obsolete**
+11. **Place Purchase Orders**
+12. **Closed / On Hold**
+
+**Rules**
+- CSR cannot edit while project is in **Structural/Graphics/Sample**.
+- CSR **regains edit** after **Pricing/Quoting** to trigger **New Revision** (which pushes the project back to Triage → Structural).
+- Graphics is blocked until Structural posts **BaselineReady**.
+- Sample & Graphics **may** run in parallel **after BaselineReady** (configurable), but **Structural & Graphics never run together**.
+- Urgent/Skin-line requires **Design Manager approval** before assignment.
+
+Each transition emits an analytics event with timestamps and actor.
+
+---
+
+## 3) Assignment Engine (Skill & Load Aware)
+**Inputs**
+- Project difficulty (CSR dropdown: L/M/H/Expert‑Only)
+- Required skills: e.g., **Trip‑Wall HSC**, **Retail Die‑Cut**, **FEFCO 0201**, **Mylar**, **Print Die alignment**, **ArtiosCAD macro**, **Skin line** (rush)
+- Designer profiles: skills, seniority level, certifications, allowed difficulty cap, current WIP, personal SLAs, work hours
+- Queue policy: **Auto‑assign** vs **Designer self‑select** vs **Design Manager assign**
+
+**Algorithm**
+1. Filter designers by required skills and difficulty cap.
+2. Score by (availability, WIP load, recent throughput, SLA risk, last‑assigned fairness).
+3. If **rush**, require manager approval; then place on top of the highest scoring eligible designer’s queue.
+4. If **self‑select** mode: show designers a prioritized list; lock on first acceptance; timeout returns to queue.
+
+**Overrides**
+- Design Manager can force assign or split tasks (e.g., Structural=Designer A, Graphics=Designer B).
+
+---
+
+## 4) Intake (CSR) — Fields & Validations
+- Customer (account, contact)
+- Sales Rep (owner)
+- Project Title & Customer Reference
+- Requested Date, Target Ship Date
+- Priority: Normal / Urgent (requires approval)
+- Difficulty: L/M/H/Expert
+- Structural Instructions (free text + checklist prompts)
+- Graphics Instructions (brand, colors, dieline refs)
+- Artifacts: customer sketches, photos, PDFs, Excel, emails
+- Packaging Specs (if known): FEFCO code, flute (e.g., 29C/32C/44C), ECT, inside dims, pallet target (48x45), stack requirements (truck 2‑high, warehouse 4‑high), part weight (ea & total), pads needed, wood posts, triple‑wall candidate, etc.
+- Tooling/Standards references: die cuts, print dies, mylars, legacy standards
+- Quantity of samples requested; destination(s)
+- Courier vs Company Truck vs Internal Bin (default from customer profile)
+- External Order # (optional at intake; can be linked later in dispatch)
+
+**UX**: progressive disclosure + templates per customer; validation hints; auto‑suggests from past jobs.
+
+---
+
+## 5) Structural & Graphics Swimlanes
+**Common**: personal queues, timers, checklists, file versioning, comment threads pinned to file versions, peer review gates.
+
+**Structural**
+- Owns **material grade selection** (48BC/44C/32B/…)
+- Owns **fit/tolerance**
+- Produces **CAD + baseline dieline**; marks **Baseline Ready**
+
+**Graphics**
+- Starts after Baseline Ready
+- Produces production dieline/artwork; marks **Artwork Ready**
+
+---
+
+## 6) Sample Making & Logistics
+**Sample Flow**
+1) Structural delivers CAD/dieline baseline.
+2) Sample Maker sends to table, cuts, glues, packages (if needed).
+3) Click **Generate Delivery Label** → auto PDF (Destination, Contact, Project, Docket, Description, Dimensions, Sample Qty, Sales Rep, optional QR).
+4) Click **Notify Logistics** → email with specs + DeliveryLabel.pdf attached.
+5) Logistics creates FedEx/Truck paperwork externally and pastes **Tracking/Order #** back into PM Shipment.
+
+**Labels (as-is + improved)**
+- **Flute Sample Label** (keep in Flute; store docket ref/link).
+- **Delivery Label (PM)** replaces Word template; versioned PDF stored in Files.
+- **Carrier Label** (FedEx) created by Logistics; PM only stores tracking.
+
+**Disposition**
+- Bin placement, Courier, Company Truck — selectable; truck flows include **External Order #** from Flute.
+
+---
+
+## 7) Inventory & Tools Registry
+**Sample Stock Visibility (simplified grades)**
+- Track coarse **corrugation grades only** for now: e.g., **48BC, 44C, 32B, 29C**. No SKU-level detail.
+- Fields: `grade`, `onHand`, `minLevel`, `location`, `lastUpdated`.
+- Low‑stock alerts → **Sample Making lead + Design Manager**.
+
+**Tooling Registry**
+- Die cuts, print dies, mylars, standards; link to projects; availability notes.
+
+---
+
+## 8) Collaboration & Communication
+- **Project Chat** (threaded, mentions, attachments) replacing email back‑and‑forth; retains audit trail.
+- **System Notes** (automations) are read‑only.
+- **Customer‑safe Threads** (optional) for proofs.
+- **Notifications**: in‑app + email; digest options.
+
+---
+
+## 9) Audit & Compliance
+- Immutable **Event Store** (append‑only): who/what/when/from where
+- Every status change, field edit, file version, assignment, label print, shipment action
+- IP/device capture, reason codes for overrides
+- Exportable for investigations
+
+---
+
+## 10) Analytics & KPIs
+**Event Model (analytics‑ready)**
+- `ProjectCreated`, `EnteredTriage`, `AssignedStructural`, `StructuralStarted`, `StructuralCompleted`, `AssignedGraphics`, `GraphicsCompleted`, `EnteredSample`, `SampleCompleted`, `ReadyForDispatch`, `Dispatched`, `Delivered`, `Closed`, `OnHold`, `RushRequested`, `RushApproved/Rejected`
+
+**Sample Metrics**
+- Lead time by stage & end‑to‑end
+- Acceptance latency (assign→start)
+- Work time vs queue time per stage
+- Throughput per designer / skill area
+- Rush impact (preemptions, SLA hits)
+- Rework rate (reopens)
+- Sample output vs scrap; courier cost per customer
+
+**Dashboards**
+- Today’s Work (by person & team)
+- SLA Heatmap (due vs at risk)
+- Bottleneck Analyzer (WIP aging)
+- Skill Coverage Map (demand vs supply)
+- Inventory Low‑Stock & Tool Conflicts
+
+---
+
+## 11) Data Model (Core Entities)
+**Project**
+- id, customerId, salesRepId, csrId, title, priority, difficulty, requestedDate, targetShipDate, status, flags (rush, hold)
+- **docketNo**, fluteLinks[]
+- counts: requestedSamples, producedSamples
+
+**SwimlaneTask** (Structural/Graphics)
+- id, projectId, lane, assigneeId, status, startAt, completeAt, timeTracked, checklistState
+- **Structural fields**: materialGrade, fitTolerance, baselineReadyAt
+- **Graphics fields**: artworkReadyAt
+
+**File**
+- id, projectId, lane, type (cad, dieline, proof, photo, label), version, storageKey, checksum, uploadedBy, uploadedAt
+
+**Revision**
+- id, projectId, lane, number, reason(enum), requestedBy, approvedBy, notes, createdAt
+
+**SampleOrder**
+- id, projectId, producedCount, packaged, deliveryLabelUrl, logisticsNotifiedAt, notes
+
+**Shipment**
+- id, projectId, mode (bin|courier|truck), carrier, tracking, externalOrderNo, dispatchedAt, deliveredAt
+
+**InventoryGrade**
+- id, **grade** (48BC|44C|32B|…), onHand, minLevel, location, lastUpdated
+
+**Tooling**
+- id, type, code, location, status, lastMaintained
+
+**Event** (Audit)
+- id, projectId, actorId, type, payload(JSON), createdAt
+
+---
+
+## 12) Integrations
+- **ArtiosCAD / i‑cut**: file handoff & status webhooks (via shared folder or API adapter)
+- **ERP/WMS**: read‑only order lookup + writeback of external order #; shipping cost centers
+- **Label Printers**: ZPL via print service
+- **Courier APIs**: UPS/FedEx/Canada Post (optional)
+- **SSO**: Azure AD/Okta; SCIM for user provisioning
+- **BI**: Direct connects (Power BI) to read‑only analytics schema
+
+---
+
+## 13) Non‑Functional Requirements
+- **Usability**: Guided forms, copy‑from‑past‑project, context tips, keyboard shortcuts
+- **Performance**: P95 < 300ms for common reads; background jobs for heavy tasks
+- **Reliability**: 99.9% core uptime; retries for webhooks; idempotent event ingestion
+- **Security**: RBAC + row‑level security; PII minimization; encrypted at rest & TLS in transit; immutable audit
+- **Scalability**: Horizontal web workers; separate OLTP vs OLAP stores
+- **Observability**: structured logs, tracing, metrics
+
+---
+
+## 14) Tech Stack (Opinionated)
+- **Backend**: Django + DRF, PostgreSQL (or SQL Server), Redis + Celery
+- **Frontend**: React + MUI; WebSockets for realtime
+- **Storage**: Windows file share or MinIO; signed URLs
+- **Email**: SMTP relay to Logistics
+- **Hosting**: Windows VM (IIS for frontend + gunicorn/uvicorn via service); SSO via local AD
+- **BI**: Power BI over read‑only analytics schema
+
+---
+
+## 15) API Contract (Samples)
+**Create Project (CSR)**
+```
+POST /api/projects
+{
+  "customerId": "CUST-123",
+  "salesRepId": "USR-501",
+  "csrId": "USR-301",
+  "title": "HSC + Lid Triple‑Wall",
+  "priority": "normal",
+  "difficulty": "high",
+  "requestedDate": "2025-10-17",
+  "targetShipDate": "2025-10-24",
+  "packagingSpec": {
+    "fefco": "HSC",
+    "flute": "Triple",
+    "ect": 44,
+    "dims": {"L": 48, "W": 45, "H": 45},
+    "pallet": "48x45",
+    "stackRules": {"truckHigh": 2, "warehouseHigh": 4},
+    "partWeight": 35,
+    "posts": true,
+    "tripleWallCandidate": true
+  },
+  "requestedSamples": 1
+}
+```
+
+**Approve Rush**
+```
+POST /api/projects/{id}/rush-approve
+{ "reason": "Skin line request for EarthFresh" }
+```
+
+**Assign Structural**
+```
+POST /api/tasks/{taskId}/assign
+{ "assigneeId": "USR-700" }
+```
+
+**Create Shipment (Courier)**
+```
+POST /api/shipments
+{
+  "projectId": "PRJ-9001",
+  "mode": "courier",
+  "carrier": "UPS",
+  "tracking": "1Z...",
+  "labelUrl": "s3://labels/PRJ-9001.pdf"
+}
+```
+
+---
+
+## 16) Analytics SQL (Examples)
+**Stage Lead Time**
+```sql
+SELECT project_id,
+       MIN(CASE WHEN event_type='AssignedStructural' THEN created_at END) AS structural_assigned,
+       MIN(CASE WHEN event_type='StructuralStarted' THEN created_at END)  AS structural_started,
+       MIN(CASE WHEN event_type='StructuralCompleted' THEN created_at END) AS structural_done,
+       EXTRACT(EPOCH FROM (MIN(CASE WHEN event_type='StructuralCompleted' THEN created_at END) -
+                           MIN(CASE WHEN event_type='StructuralStarted' THEN created_at END)))/3600 AS hours_in_structural
+FROM events
+GROUP BY project_id;
+```
+
+**Acceptance Latency**
+```sql
+SELECT project_id,
+       EXTRACT(EPOCH FROM (
+         MIN(CASE WHEN event_type='StructuralStarted' THEN created_at END) -
+         MIN(CASE WHEN event_type='AssignedStructural' THEN created_at END)
+       ))/3600 AS hours_to_accept
+FROM events
+GROUP BY project_id;
+```
+
+---
+
+## 17) UX Blueprints (Screens)
+**This is a new UI/UX (do not mimic current PM).**
+- **My Work** (per role): prioritized queue, timers, due dates, blockers, quick actions
+- **Intake Wizard (CSR)**: guided fields; difficulty/priority; validation; customer templates
+- **Triage Board (Design Mgr)**: difficulty badges, load indicators, assign/override, rush approvals
+- **Project View**: timeline, chat, files, **Revisions tab**, **Sample panel** (Generate Delivery Label, Notify Logistics), **Shipments tab**, **Stock widget (grades)**
+- **Inventory Grades**: 48BC/44C/32B levels + thresholds, alerts panel
+- **Dashboards**: SLA heatmap, WIP aging, throughput, revisions, rush impact
+
+---
+
+## 18) Governance & Admin
+- User onboarding wizard (role, skills, difficulty cap)
+- Vocabularies: difficulty levels, skill tags, FEFCO presets, carriers, bins
+- SLAs per customer/priority
+- Audit export & data retention
+
+---
+
+## 19) Implementation Roadmap (Phased)
+1. **MVP**: Intake → Triage → Structural/Graphics → Sample → Dispatch; basic chat; RBAC; labels; audit events
+2. **Phase 2**: Skill‑based assignment engine; inventory & tooling registry; dashboards
+3. **Phase 3**: Courier API integration; self‑select queues; customer‑safe threads; predictive ETA
+4. **Phase 4**: Advanced analytics, capacity planning, optimization heuristics
+
+---
+
+## 20) Acceptance Criteria (Examples)
+- CSR cannot edit scope after project enters **In Design**; comments still allowed.
+- Rush request is invisible to designer queues until manager approval event exists.
+- Every file upload creates a new version; previous versions read‑only.
+- Every status transition writes an immutable event with actor and timestamp.
+- Label PDFs are reproducible from stored template + snapshot data.
+
+---
+
+## 21) Open Decisions
+- Graphics gating on Structural baseline: on/off per customer
+- Self‑select vs auto‑assign default per team
+- Which courier APIs to integrate first (if any)
+- Tooling conflict resolution (hard block vs warning)
+
